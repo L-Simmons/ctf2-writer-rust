@@ -291,7 +291,7 @@ impl TraceWriter {
         let path = self.dir.join(filename);
 
         StreamWriter::new(
-            path,
+            &path,
             stream_class_id,
             stream_id,
             self.config.byte_order,

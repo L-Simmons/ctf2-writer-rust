@@ -130,12 +130,12 @@ impl BitEncoder {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        let byte_len = (self.bit_pos + 7) / 8;
+        let byte_len = self.bit_pos.div_ceil(8);
         &self.buf[..byte_len]
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
-        let byte_len = (self.bit_pos + 7) / 8;
+        let byte_len = self.bit_pos.div_ceil(8);
         let mut buf = self.buf;
         buf.truncate(byte_len);
         buf
@@ -151,7 +151,7 @@ impl BitEncoder {
 
     pub fn rollback(&mut self, checkpoint: usize) {
         let start_byte = checkpoint / 8;
-        let end_byte = (self.bit_pos + 7) / 8;
+        let end_byte = self.bit_pos.div_ceil(8);
         for i in start_byte..end_byte {
             if i < self.buf.len() {
                 self.buf[i] = 0;

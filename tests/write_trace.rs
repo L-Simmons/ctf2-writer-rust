@@ -122,7 +122,7 @@ fn write_simple_trace() {
         let timestamp = i * 1_000_000;
         stream
             .write_event(0, timestamp, |enc| {
-                enc.write_unsigned(i as u64 * 42, 32);
+                enc.write_unsigned(i * 42, 32);
             })
             .unwrap();
     }
@@ -497,7 +497,7 @@ fn multiple_field_types() {
     // floats
     stream
         .write_event(2, ts, |enc| {
-            enc.write_f32(3.14);
+            enc.write_f32(1.5);
             enc.write_f64(-273.15);
         })
         .unwrap();
@@ -555,7 +555,7 @@ fn multiple_field_types() {
     );
 
     // Check floats (babeltrace2 prints limited precision)
-    assert!(stdout.contains("f32_val = 3.14"), "f32 pi");
+    assert!(stdout.contains("f32_val = 1.5"), "f32 value");
     assert!(stdout.contains("f64_val = -273.15"), "f64 neg");
 
     // Check booleans
@@ -634,7 +634,7 @@ fn multiple_streams() {
         if i % 2 == 0 {
             stream_render
                 .write_event(0, i * 500_000, |enc| {
-                    enc.write_unsigned(i as u64 / 2, 32);
+                    enc.write_unsigned(i / 2, 32);
                 })
                 .unwrap();
         }

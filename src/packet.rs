@@ -9,12 +9,7 @@ pub struct PacketWriter {
     // Bit positions we need to patch on finalize
     content_length_pos: usize,
     end_timestamp_pos: usize,
-    begin_timestamp: u64,
     event_count: u64,
-    stream_class_id: u64,
-    stream_id: u64,
-    sequence_number: u64,
-    byte_order: ByteOrder,
 }
 
 impl PacketWriter {
@@ -61,12 +56,7 @@ impl PacketWriter {
             packet_size_bits,
             content_length_pos,
             end_timestamp_pos,
-            begin_timestamp,
             event_count: 0,
-            stream_class_id,
-            stream_id,
-            sequence_number,
-            byte_order,
         }
     }
 

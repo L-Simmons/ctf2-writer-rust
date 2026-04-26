@@ -2,11 +2,10 @@ use crate::byte_order::ByteOrder;
 use crate::packet::PacketWriter;
 use std::fs::File;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::Path;
 
 pub struct StreamWriter {
     file: File,
-    path: PathBuf,
     stream_class_id: u64,
     stream_id: u64,
     byte_order: ByteOrder,
@@ -19,17 +18,16 @@ pub struct StreamWriter {
 
 impl StreamWriter {
     pub fn new(
-        path: PathBuf,
+        path: &Path,
         stream_class_id: u64,
         stream_id: u64,
         byte_order: ByteOrder,
         trace_uuid: [u8; 16],
         packet_size_bytes: usize,
     ) -> io::Result<Self> {
-        let file = File::create(&path)?;
+        let file = File::create(path)?;
         Ok(Self {
             file,
-            path,
             stream_class_id,
             stream_id,
             byte_order,
