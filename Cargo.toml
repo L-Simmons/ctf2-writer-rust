@@ -3,6 +3,10 @@ name = "ctf2-writer"
 version = "0.1.0"
 edition = "2021"
 description = "Native Rust writer for Common Trace Format 2 (CTF2)"
+license = "MIT"
+repository = "https://github.com/L-Simmons/ctf2-writer-rust"
+keywords = ["ctf", "tracing", "binary", "serialization"]
+categories = ["encoding", "development-tools::profiling"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
