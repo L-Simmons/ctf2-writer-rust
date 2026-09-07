@@ -120,7 +120,11 @@ impl BitEncoder {
             let shift = remaining - bits_in_byte;
             let chunk = ((value >> shift) & ((1u64 << bits_in_byte) - 1)) as u8;
             let dest_shift = 8 - bit_offset - bits_in_byte;
-            let mask = if bits_in_byte == 8 { 0xFFu8 } else { (1u8 << bits_in_byte) - 1 };
+            let mask = if bits_in_byte == 8 {
+                0xFFu8
+            } else {
+                (1u8 << bits_in_byte) - 1
+            };
             self.buf[byte_idx] &= !(mask << dest_shift);
             self.buf[byte_idx] |= chunk << dest_shift;
 

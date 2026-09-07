@@ -2,7 +2,7 @@ use ctf2_writer::*;
 use std::path::Path;
 use std::process::Command;
 
-const BT2: &str = "/tmp/babeltrace2-install/bin/babeltrace2";
+const BT2: &str = "babeltrace2";
 
 fn babeltrace2_read(trace_dir: &Path) -> (bool, String) {
     let output = Command::new(BT2)
@@ -215,7 +215,11 @@ fn packet_overflow_multiple_packets() {
 
     // Verify first and last event values
     let first_line = stdout.lines().next().unwrap();
-    assert!(first_line.contains("value = 0"), "first event: {}", first_line);
+    assert!(
+        first_line.contains("value = 0"),
+        "first event: {}",
+        first_line
+    );
     let last_line = stdout.lines().last().unwrap();
     assert!(
         last_line.contains(&format!("value = {}", num_events - 1)),
@@ -549,10 +553,7 @@ fn multiple_field_types() {
     assert!(stdout.contains("neg_i8 = -1"), "i8 -1");
     assert!(stdout.contains("neg_i32 = -42"), "i32 -42");
     assert!(stdout.contains("pos_i32 = 42"), "i32 +42");
-    assert!(
-        stdout.contains("neg_i64 = -9223372036854775808"),
-        "i64 min"
-    );
+    assert!(stdout.contains("neg_i64 = -9223372036854775808"), "i64 min");
 
     // Check floats (babeltrace2 prints limited precision)
     assert!(stdout.contains("f32_val = 1.5"), "f32 value");

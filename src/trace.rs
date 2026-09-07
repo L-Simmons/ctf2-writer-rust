@@ -1,10 +1,10 @@
 use crate::byte_order::ByteOrder;
-use crate::clock::Clock;
 use crate::metadata::*;
 use crate::stream::StreamWriter;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct EventClassDef {
     pub id: u64,
@@ -26,6 +26,8 @@ pub struct TraceConfig {
     pub stream_classes: Vec<StreamClassDef>,
 }
 
+use crate::clock::Clock;
+
 impl Default for TraceConfig {
     fn default() -> Self {
         Self {
@@ -44,17 +46,119 @@ pub struct TraceWriter {
     next_stream_id: u64,
 }
 
+/// A version 4 UUID from the wall clock and the process id, with no random source.
+pub fn trace_uuid() -> [u8; 16] {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_nanos();
+    let mut uuid = nanos.to_le_bytes();
+    uuid[12..].copy_from_slice(&std::process::id().to_le_bytes());
+    uuid[6] = (uuid[6] & 0x0f) | 0x40;
+    uuid[8] = (uuid[8] & 0x3f) | 0x80;
+    uuid
+}
+
+fn byte_order_str(byte_order: ByteOrder) -> &'static str {
+    match byte_order {
+        ByteOrder::LittleEndian => "little-endian",
+        ByteOrder::BigEndian => "big-endian",
+    }
+}
+
+fn unsigned(length: u32, byte_order: ByteOrder, role: &str) -> FieldClass {
+    FieldClass::FixedLengthUnsignedInteger {
+        length,
+        byte_order: byte_order_str(byte_order).to_string(),
+        alignment: None,
+        preferred_display_base: None,
+        roles: Some(vec![role.to_string()]),
+        mappings: None,
+    }
+}
+
+fn member(name: &str, field_class: FieldClass) -> MemberClass {
+    MemberClass {
+        name: name.to_string(),
+        field_class,
+    }
+}
+
+/// The packet header PacketWriter writes: magic, uuid, stream class id, stream id.
+pub fn packet_header_field_class(byte_order: ByteOrder) -> FieldClass {
+    FieldClass::Structure {
+        member_classes: Some(vec![
+            member(
+                "magic",
+                FieldClass::FixedLengthUnsignedInteger {
+                    length: 32,
+                    byte_order: byte_order_str(byte_order).to_string(),
+                    alignment: None,
+                    preferred_display_base: Some(16),
+                    roles: Some(vec!["packet-magic-number".to_string()]),
+                    mappings: None,
+                },
+            ),
+            member(
+                "uuid",
+                FieldClass::StaticLengthBlob {
+                    length: 16,
+                    media_type: None,
+                    roles: Some(vec!["metadata-stream-uuid".to_string()]),
+                },
+            ),
+            member(
+                "stream_class_id",
+                unsigned(64, byte_order, "data-stream-class-id"),
+            ),
+            member("stream_id", unsigned(64, byte_order, "data-stream-id")),
+        ]),
+        minimum_alignment: None,
+    }
+}
+
+/// The packet context PacketWriter writes: the two lengths, the two timestamps,
+/// the discarded count and the sequence number.
+pub fn packet_context_field_class(byte_order: ByteOrder) -> FieldClass {
+    FieldClass::Structure {
+        member_classes: Some(vec![
+            member(
+                "packet_total_length",
+                unsigned(64, byte_order, "packet-total-length"),
+            ),
+            member(
+                "packet_content_length",
+                unsigned(64, byte_order, "packet-content-length"),
+            ),
+            member(
+                "timestamp_begin",
+                unsigned(64, byte_order, "default-clock-timestamp"),
+            ),
+            member(
+                "timestamp_end",
+                unsigned(64, byte_order, "packet-end-default-clock-timestamp"),
+            ),
+            member(
+                "events_discarded",
+                unsigned(64, byte_order, "discarded-event-record-counter-snapshot"),
+            ),
+            member(
+                "packet_seq_num",
+                unsigned(64, byte_order, "packet-sequence-number"),
+            ),
+        ]),
+        minimum_alignment: None,
+    }
+}
+
 impl TraceWriter {
     pub fn create(dir: &Path, config: TraceConfig) -> io::Result<Self> {
         fs::create_dir_all(dir)?;
 
-        let uuid_val = uuid::Uuid::new_v4();
-        let uuid_bytes: [u8; 16] = *uuid_val.as_bytes();
-
         let trace = Self {
             dir: dir.to_path_buf(),
             config,
-            uuid: uuid_bytes,
+            uuid: trace_uuid(),
             next_stream_id: 0,
         };
 
@@ -62,23 +166,14 @@ impl TraceWriter {
         Ok(trace)
     }
 
-    fn byte_order_str(&self) -> &'static str {
-        match self.config.byte_order {
-            ByteOrder::LittleEndian => "little-endian",
-            ByteOrder::BigEndian => "big-endian",
-        }
-    }
-
     fn write_metadata(&self) -> io::Result<()> {
         let mut fragments: Vec<Fragment> = Vec::new();
 
-        // Preamble
         fragments.push(Fragment::Preamble(Preamble {
             version: 2,
             uuid: Some(self.uuid.to_vec()),
         }));
 
-        // Clock classes
         for clock in &self.config.clocks {
             fragments.push(Fragment::ClockClass(ClockClass {
                 id: clock.name.clone(),
@@ -100,166 +195,27 @@ impl TraceWriter {
             }));
         }
 
-        let bo = self.byte_order_str();
+        let bo = self.config.byte_order;
 
-        // Trace class with packet header
         fragments.push(Fragment::TraceClass(TraceClass {
             namespace: None,
             name: None,
             uid: None,
-            packet_header_field_class: Some(FieldClass::Structure {
-                member_classes: Some(vec![
-                    MemberClass {
-                        name: "magic".to_string(),
-                        field_class: FieldClass::FixedLengthUnsignedInteger {
-                            length: 32,
-                            byte_order: bo.to_string(),
-                            alignment: None,
-                            preferred_display_base: Some(16),
-                            roles: Some(vec!["packet-magic-number".to_string()]),
-                            mappings: None,
-                        },
-                    },
-                    MemberClass {
-                        name: "uuid".to_string(),
-                        field_class: FieldClass::StaticLengthBlob {
-                            length: 16,
-                            media_type: None,
-                            roles: Some(vec!["metadata-stream-uuid".to_string()]),
-                        },
-                    },
-                    MemberClass {
-                        name: "stream_class_id".to_string(),
-                        field_class: FieldClass::FixedLengthUnsignedInteger {
-                            length: 64,
-                            byte_order: bo.to_string(),
-                            alignment: None,
-                            preferred_display_base: None,
-                            roles: Some(vec!["data-stream-class-id".to_string()]),
-                            mappings: None,
-                        },
-                    },
-                    MemberClass {
-                        name: "stream_id".to_string(),
-                        field_class: FieldClass::FixedLengthUnsignedInteger {
-                            length: 64,
-                            byte_order: bo.to_string(),
-                            alignment: None,
-                            preferred_display_base: None,
-                            roles: Some(vec!["data-stream-id".to_string()]),
-                            mappings: None,
-                        },
-                    },
-                ]),
-                minimum_alignment: None,
-            }),
+            packet_header_field_class: Some(packet_header_field_class(bo)),
             attributes: None,
         }));
 
-        // Data stream classes and event record classes
         for sc in &self.config.stream_classes {
             fragments.push(Fragment::DataStreamClass(DataStreamClass {
                 id: sc.id,
                 namespace: None,
                 name: sc.name.clone(),
                 default_clock_class_id: sc.clock_name.clone(),
-                packet_context_field_class: Some(FieldClass::Structure {
-                    member_classes: Some(vec![
-                        MemberClass {
-                            name: "packet_total_length".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec!["packet-total-length".to_string()]),
-                                mappings: None,
-                            },
-                        },
-                        MemberClass {
-                            name: "packet_content_length".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec!["packet-content-length".to_string()]),
-                                mappings: None,
-                            },
-                        },
-                        MemberClass {
-                            name: "timestamp_begin".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec!["default-clock-timestamp".to_string()]),
-                                mappings: None,
-                            },
-                        },
-                        MemberClass {
-                            name: "timestamp_end".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec!["packet-end-default-clock-timestamp".to_string()]),
-                                mappings: None,
-                            },
-                        },
-                        MemberClass {
-                            name: "events_discarded".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec![
-                                    "discarded-event-record-counter-snapshot".to_string(),
-                                ]),
-                                mappings: None,
-                            },
-                        },
-                        MemberClass {
-                            name: "packet_seq_num".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec!["packet-sequence-number".to_string()]),
-                                mappings: None,
-                            },
-                        },
-                    ]),
-                    minimum_alignment: None,
-                }),
+                packet_context_field_class: Some(packet_context_field_class(bo)),
                 event_record_header_field_class: Some(FieldClass::Structure {
                     member_classes: Some(vec![
-                        MemberClass {
-                            name: "event_id".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec!["event-record-class-id".to_string()]),
-                                mappings: None,
-                            },
-                        },
-                        MemberClass {
-                            name: "timestamp".to_string(),
-                            field_class: FieldClass::FixedLengthUnsignedInteger {
-                                length: 64,
-                                byte_order: bo.to_string(),
-                                alignment: None,
-                                preferred_display_base: None,
-                                roles: Some(vec!["default-clock-timestamp".to_string()]),
-                                mappings: None,
-                            },
-                        },
+                        member("event_id", unsigned(64, bo, "event-record-class-id")),
+                        member("timestamp", unsigned(64, bo, "default-clock-timestamp")),
                     ]),
                     minimum_alignment: None,
                 }),
