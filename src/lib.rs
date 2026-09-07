@@ -10,4 +10,7 @@ pub use byte_order::ByteOrder;
 pub use clock::Clock;
 pub use metadata::FieldClass;
 pub use stream::StreamWriter;
-pub use trace::{EventClassDef, StreamClassDef, TraceConfig, TraceWriter};
+pub use trace::{
+    packet_context_field_class, packet_header_field_class, trace_uuid, EventClassDef,
+    StreamClassDef, TraceConfig, TraceWriter,
+};
